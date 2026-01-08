@@ -18,9 +18,26 @@ const DashboardPage: React.FC = () => {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<'video' | 'image'>('video');
 
-  const handleFileUpload = (file: File) => {
-    // Simulate upload and navigate to analysis
-    navigate('/analysis/SCN-NEW');
+  const handleFileUpload = async (file: File) => {
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const response = await fetch('http://localhost:8000/api/analyze', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error('Upload failed');
+      }
+
+      const data = await response.json();
+      navigate(`/analysis/${data.scan_id}`);
+    } catch (error) {
+      console.error("Error uploading file:", error);
+      alert("Failed to upload video. Please try again.");
+    }
   };
 
   return (
@@ -37,8 +54,8 @@ const DashboardPage: React.FC = () => {
             <button
               onClick={() => setActiveTab('video')}
               className={`flex items-center space-x-2 px-6 py-2.5 rounded-xl font-bold transition-all ${activeTab === 'video'
-                  ? 'bg-primary-blue text-white shadow-lg shadow-primary-blue/20'
-                  : 'bg-bg-section text-text-secondary hover:bg-text-primary/5'
+                ? 'bg-primary-blue text-white shadow-lg shadow-primary-blue/20'
+                : 'bg-bg-section text-text-secondary hover:bg-text-primary/5'
                 }`}
             >
               <Video className="w-5 h-5" />
@@ -47,8 +64,8 @@ const DashboardPage: React.FC = () => {
             <button
               onClick={() => setActiveTab('image')}
               className={`flex items-center space-x-2 px-6 py-2.5 rounded-xl font-bold transition-all ${activeTab === 'image'
-                  ? 'bg-primary-blue text-white shadow-lg shadow-primary-blue/20'
-                  : 'bg-bg-section text-text-secondary hover:bg-text-primary/5'
+                ? 'bg-primary-blue text-white shadow-lg shadow-primary-blue/20'
+                : 'bg-bg-section text-text-secondary hover:bg-text-primary/5'
                 }`}
             >
               <ImageIcon className="w-5 h-5" />

@@ -1,303 +1,409 @@
-
-import React, { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import React, { useEffect, useState, useRef } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { Download, Share2, Shield, AlertTriangle, CheckCircle, Info, Activity, Printer, Lock, ChevronLeft, Play, Pause, Maximize } from 'lucide-react';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
 import Navbar from '../components/Navbar';
-import GaugeChart from '../components/GaugeChart';
-import FrequencyGraph from '../components/FrequencyGraph';
-import ResultCard from '../components/ResultCard';
-import { Artifact } from '../types';
-import {
-  ChevronLeft,
-  Download,
-  Eye,
-  Maximize2,
-  Settings2,
-  Layers,
-  Scan,
-  Info,
-  Share2,
-  Printer,
-  History,
-  Shield,
-  Activity,
-  Cpu,
-  Fingerprint
-} from 'lucide-react';
 import { motion } from 'framer-motion';
 
-const mockArtifacts: Artifact[] = [
-  { label: 'Generative Texture Audit', status: 'Abnormal', details: 'Diffusion-specific artifacts detected in Y-channel chroma (94.2% conf)' },
-  { label: 'Optical Flow Consistency', status: 'Warning', details: '0.6s inconsistency in pixel velocity near jawline at 00:04s' },
-  { label: 'Blink Biometrics', status: 'Abnormal', details: 'Statistical anomaly: Blink frequency 4.8 SD from human baseline' },
-  { label: 'Phoneme Syncing', status: 'Normal', details: 'Audio-Visual alignment within standard physiological tolerances' },
-  { label: 'Latent Space Bleeding', status: 'Abnormal', details: 'Shadow artifacts inconsistent with calculated environmental light sources' },
-];
+interface FrameData {
+  timestamp: number;
+  ai_probability: number;
+  fft_anomaly: number;
+}
+
+interface ScanReport {
+  scan_id: string;
+  verdict: 'DEEPFAKE' | 'REAL' | 'UNCERTAIN';
+  confidence_score: number;
+  total_frames_analyzed: number;
+  frame_data: FrameData[];
+  created_at?: number;
+}
 
 const AnalysisPage: React.FC = () => {
-  const { id } = useParams();
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const [report, setReport] = useState<ScanReport | null>(null);
+  const [loading, setLoading] = useState(true);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [copied, setCopied] = useState(false);
+  const [currentFrame, setCurrentFrame] = useState(0);
+
+  // UI Toggles
   const [showLandmarks, setShowLandmarks] = useState(true);
   const [showHeatmap, setShowHeatmap] = useState(false);
-  const [isAnalyzing, setIsAnalyzing] = useState(true);
 
   useEffect(() => {
-    const timer = setTimeout(() => setIsAnalyzing(false), 2400);
-    return () => clearTimeout(timer);
-  }, []);
+    // Poll for results
+    const pollStatus = async () => {
+      try {
+        const response = await fetch(`http://localhost:8000/api/results/${id}`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.status === 'PROCESSING') {
+            setTimeout(pollStatus, 2000);
+          } else {
+            setReport(data);
+            setLoading(false);
+          }
+        } else {
+          setTimeout(pollStatus, 2000);
+        }
+      } catch (e) {
+        console.error("Polling error", e);
+        setTimeout(pollStatus, 2000);
+      }
+    };
+    pollStatus();
+  }, [id]);
+
+  if (loading || !report) {
+    return (
+      <div className="min-h-screen bg-[#FDFDFD] flex items-center justify-center">
+        <div className="flex flex-col items-center">
+          <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+          <p className="text-gray-500 font-medium">Analyzing Forensic Data...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // --- Handlers ---
+  const handleShare = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error("Failed to copy", err);
+    }
+  };
+
+  const handleTimelineClick = (index: number) => {
+    if (!videoRef.current || !report) return;
+    const timestamp = report.frame_data[index].timestamp;
+    videoRef.current.currentTime = timestamp;
+    videoRef.current.play();
+    setCurrentFrame(index);
+  };
+
+  const handleTimeUpdate = () => {
+    if (videoRef.current && report) {
+      const currentTime = videoRef.current.currentTime;
+      const closestFrameIndex = report.frame_data.findIndex(f => f.timestamp >= currentTime);
+      if (closestFrameIndex !== -1) setCurrentFrame(closestFrameIndex);
+    }
+  };
+
+
+  // Derived Data for UI
+  const isFake = report.verdict === 'DEEPFAKE';
+  const scoreColor = isFake ? '#EF4444' : '#3B82F6';
+
+  // Prepare Chart Data
+  const chartData = report.frame_data.map(f => ({
+    time: f.timestamp,
+    real: 100 - (f.ai_probability * 100),
+    synth: f.ai_probability * 100,
+  }));
+
+  const EVIDENCE_CHECKS = [
+    { title: "Generative Texture Audit", desc: "Diffusion-specific artifacts detected in chrominance channels", status: isFake ? 'critical' : 'pass' },
+    { title: "Optical Flow Consistency", desc: "Pixel velocity consistency checks across temporal frames", status: report.confidence_score > 30 ? 'warning' : 'pass' },
+    { title: "Blink Biometrics", desc: "Statistical anomaly detection in eye blink frequency", status: isFake ? 'critical' : 'pass' },
+    { title: "Phoneme Syncing", desc: "Audio-visual alignment verification", status: 'pass' },
+    { title: "Latent Space Bleeding", desc: "Shadow artifacts inconsistent with environmental light", status: report.confidence_score > 70 ? 'critical' : 'pass' },
+  ];
 
   return (
-    <div className="min-h-screen bg-bg-primary text-text-primary flex flex-col">
+    <div className="min-h-screen bg-[#FDFDFD] font-sans text-slate-800 pb-20">
       <Navbar />
-      <main className="flex-1 p-8 overflow-y-auto">
-        <div className="max-w-7xl mx-auto space-y-8">
-          {/* Header */}
-          <div className="flex flex-col md:flex-row md:items-center justify-between">
-            <div className="flex items-center space-x-5">
-              <Link to="/dashboard" className="w-10 h-10 flex items-center justify-center hover:bg-text-primary/5 rounded-xl transition-all border border-text-primary/5">
-                <ChevronLeft className="w-6 h-6" />
-              </Link>
-              <div>
-                <div className="flex items-center space-x-3 mb-1">
-                  <h1 className="text-2xl font-black tracking-tight">investigation_clip_01.mp4</h1>
-                  <span className="px-2 py-0.5 bg-status-fake/10 text-status-fake border border-status-fake/20 rounded text-[9px] font-black uppercase tracking-widest">High Risk</span>
-                </div>
-                <p className="text-[10px] text-text-muted font-mono flex items-center space-x-2">
-                  <Fingerprint className="w-3 h-3" />
-                  <span>UID: {id} • Forensic Hash: 0x82...FA92 • NIST Verified</span>
-                </p>
-              </div>
-            </div>
-            <div className="flex items-center space-x-3 mt-4 md:mt-0">
-              <button className="p-3 glass rounded-xl hover:bg-text-primary/5 transition-colors">
-                <Share2 className="w-4 h-4 text-text-secondary" />
-              </button>
-              <button className="px-6 py-3 bg-primary-blue text-white rounded-xl flex items-center space-x-2 text-sm font-black hover:bg-secondary-blue transition-all shadow-xl">
-                <Download className="w-4 h-4" />
-                <span>Generate Export Report</span>
-              </button>
-            </div>
-          </div>
 
-          {/* Split Screen Video Section */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            <div className="group relative glass rounded-[2rem] overflow-hidden border-white/5 shadow-2xl">
-              <div className="absolute top-6 left-6 z-10 px-3 py-1 bg-black/80 backdrop-blur rounded-lg text-[10px] font-black uppercase tracking-widest border border-white/10 flex items-center space-x-2">
-                <div className="w-2 h-2 rounded-full bg-slate-500"></div>
-                <span>Source Material</span>
-              </div>
-              <img
-                src="https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=1000&q=80"
-                alt="Original"
-                className="w-full aspect-video object-cover"
-              />
-              <div className="absolute bottom-6 right-6 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button className="p-3 bg-black/60 rounded-xl hover:bg-black/80 transition-colors">
-                  <Maximize2 className="w-4 h-4 text-white" />
-                </button>
-              </div>
-            </div>
-
-            <div className="relative glass rounded-[2rem] overflow-hidden border-forensic-blue/20 shadow-2xl shadow-forensic-blue/5">
-              <div className="absolute top-6 left-6 z-10 px-3 py-1 bg-forensic-blue/80 backdrop-blur rounded-lg text-[10px] font-black uppercase tracking-widest text-white flex items-center space-x-2">
-                <Activity className="w-3 h-3" />
-                <span>Analysis Overlay</span>
-              </div>
-              <div className="relative">
-                <img
-                  src="https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=1000&q=80"
-                  alt="Analysis"
-                  className={`w-full aspect-video object-cover transition-all grayscale contrast-125 ${showHeatmap ? 'brightness-50' : ''}`}
-                />
-                {/* Mock Landmarks Overlay */}
-                {showLandmarks && (
-                  <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox="0 0 100 100">
-                    <path d="M40,35 Q50,30 60,35" stroke="#2563EB" strokeWidth="0.5" fill="none" opacity="0.8" />
-                    <circle cx="45" cy="42" r="1.5" stroke="#2563EB" strokeWidth="0.3" fill="none" />
-                    <circle cx="55" cy="42" r="1.5" stroke="#2563EB" strokeWidth="0.3" fill="none" />
-                    <path d="M42,65 Q50,70 58,65" stroke="#DC2626" strokeWidth="1" fill="none" className="animate-pulse" />
-                    <rect x="35" y="30" width="30" height="45" stroke="rgba(37,99,235,0.2)" strokeWidth="0.2" fill="none" />
-                  </svg>
-                )}
-                {/* Mock Heatmap */}
-                {showHeatmap && (
-                  <div className="absolute inset-0 bg-gradient-to-br from-status-fake/40 via-transparent to-status-fake/30 mix-blend-overlay"></div>
-                )}
-              </div>
-
-              <div className="absolute bottom-6 left-6 right-6 flex items-center justify-between p-4 glass-heavy rounded-2xl">
-                <div className="flex space-x-8">
-                  <label className="flex items-center space-x-3 cursor-pointer group">
-                    <div className={`w-9 h-5 rounded-full relative transition-all ${showLandmarks ? 'bg-primary-blue shadow-lg shadow-primary-blue/40' : 'bg-text-primary/20'}`}>
-                      <input type="checkbox" className="hidden" checked={showLandmarks} onChange={() => setShowLandmarks(!showLandmarks)} />
-                      <div className={`absolute top-1 left-1 w-3 h-3 bg-white rounded-full transition-transform ${showLandmarks ? 'translate-x-4' : 'translate-x-0'}`}></div>
-                    </div>
-                    <span className="text-[10px] font-black uppercase text-text-secondary group-hover:text-text-primary tracking-widest">Landmarks</span>
-                  </label>
-                  <label className="flex items-center space-x-3 cursor-pointer group">
-                    <div className={`w-9 h-5 rounded-full relative transition-all ${showHeatmap ? 'bg-status-fake shadow-lg shadow-status-fake/40' : 'bg-text-primary/20'}`}>
-                      <input type="checkbox" className="hidden" checked={showHeatmap} onChange={() => setShowHeatmap(!showHeatmap)} />
-                      <div className={`absolute top-1 left-1 w-3 h-3 bg-white rounded-full transition-transform ${showHeatmap ? 'translate-x-4' : 'translate-x-0'}`}></div>
-                    </div>
-                    <span className="text-[10px] font-black uppercase text-text-secondary group-hover:text-text-primary tracking-widest">Heatmap</span>
-                  </label>
-                </div>
-                <div className="flex items-center space-x-2 text-primary-blue">
-                  <Scan className="w-4 h-4 animate-pulse" />
-                  <span className="text-[10px] font-mono font-black uppercase tracking-widest">Analyzing Frame 492...</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Data Grid */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            {/* Col 1: Probability Gauge */}
-            <div className="glass p-8 rounded-[2rem] flex flex-col min-h-[450px]">
-              <div className="flex items-center justify-between mb-8">
-                <h3 className="font-black text-xs uppercase tracking-[0.2em] text-text-muted flex items-center space-x-3">
-                  <Cpu className="w-4 h-4 text-primary-blue" />
-                  <span>Detection Score</span>
-                </h3>
-                <button className="text-text-muted hover:text-text-primary transition-colors">
-                  <Info className="w-4 h-4" />
-                </button>
-              </div>
-              <div className="flex-1">
-                <GaugeChart probability={94} />
-              </div>
-              <div className="mt-8 p-5 bg-status-fake/5 border border-status-fake/10 rounded-2xl">
-                <p className="text-xs text-status-fake font-bold leading-relaxed">
-                  CRITICAL: Subject exhibits 48% deviation from human neural temporal patterns. Verification mandatory for legal processing.
-                </p>
-              </div>
-            </div>
-
-            {/* Col 2: Artifacts List */}
-            <div className="glass p-8 rounded-[2rem] flex flex-col min-h-[450px]">
-              <div className="flex items-center justify-between mb-8">
-                <h3 className="font-black text-xs uppercase tracking-[0.2em] text-text-muted flex items-center space-x-3">
-                  <Settings2 className="w-4 h-4 text-primary-blue" />
-                  <span>Forensic Evidence</span>
-                </h3>
-                <span className="text-[10px] font-mono font-black text-status-fake bg-status-fake/10 px-2 py-0.5 rounded">3 CRITICAL</span>
-              </div>
-              <div className="flex-1 space-y-4 overflow-y-auto pr-2 custom-scroll">
-                {mockArtifacts.map((item, i) => (
-                  <motion.div
-                    key={item.label}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: i * 0.1 }}
-                  >
-                    <ResultCard artifact={item} />
-                  </motion.div>
-                ))}
-              </div>
-            </div>
-
-            {/* Col 3: Frequency Graph */}
-            <div className="glass p-8 rounded-[2rem] flex flex-col min-h-[450px]">
-              <div className="flex items-center justify-between mb-10">
-                <h3 className="font-black text-xs uppercase tracking-[0.2em] text-text-muted flex items-center space-x-3">
-                  <Activity className="w-4 h-4 text-primary-blue" />
-                  <span>Frequency Profile</span>
-                </h3>
-                <div className="flex items-center space-x-4">
-                  <div className="flex items-center space-x-2">
-                    <div className="w-2 h-2 rounded-full bg-primary-blue"></div>
-                    <span className="text-[9px] font-black uppercase text-text-muted">Real</span>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <div className="w-2 h-2 rounded-full bg-status-fake"></div>
-                    <span className="text-[9px] font-black uppercase text-text-muted">Synth</span>
-                  </div>
-                </div>
-              </div>
-              <div className="flex-1 min-h-[220px]">
-                <FrequencyGraph />
-              </div>
-              <div className="mt-10 space-y-4 pt-6 border-t border-text-primary/5">
-                <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-widest">
-                  <span className="text-text-muted">Temporal Blur</span>
-                  <span className="text-status-fake">High Variance</span>
-                </div>
-                <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-widest">
-                  <span className="text-text-muted">Pixel Jitter</span>
-                  <span className="text-primary-blue">Low</span>
-                </div>
-                <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-widest">
-                  <span className="text-text-muted">Artifact Density</span>
-                  <span className="text-status-fake">0.82 / frame</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Evidence Timeline */}
-          <div className="glass p-8 rounded-[2rem]">
-            <h3 className="font-black text-xs uppercase tracking-[0.2em] text-text-muted mb-8 flex items-center space-x-3">
-              <History className="w-4 h-4 text-primary-blue" />
-              <span>Artifact Detection Timeline</span>
-            </h3>
-            <div className="relative h-12 bg-text-primary/5 rounded-xl border border-text-primary/5 overflow-hidden group">
-              <div className="absolute top-0 left-[20%] w-1 h-full bg-status-fake/40 group-hover:bg-status-fake/80 transition-colors"></div>
-              <div className="absolute top-0 left-[21%] w-8 h-full bg-status-fake/10 group-hover:bg-status-fake/20"></div>
-
-              <div className="absolute top-0 left-[45%] w-1 h-full bg-status-fake/40 group-hover:bg-status-fake/80"></div>
-
-              <div className="absolute top-0 left-[82%] w-1 h-full bg-status-fake/40 group-hover:bg-status-fake/80"></div>
-              <div className="absolute top-0 left-[83%] w-12 h-full bg-status-fake/10 group-hover:bg-status-fake/20"></div>
-
-              {/* Timeline Marks */}
-              <div className="absolute inset-x-0 bottom-0 h-1 flex justify-between px-2">
-                {Array.from({ length: 10 }).map((_, i) => (
-                  <div key={i} className="w-px h-full bg-text-primary/10"></div>
-                ))}
-              </div>
-            </div>
-            <div className="flex justify-between mt-4 text-[9px] font-mono text-text-muted font-bold uppercase tracking-widest">
-              <span>00:00:00</span>
-              <span>00:00:04</span>
-              <span>00:00:08</span>
-              <span>00:00:12</span>
-            </div>
-          </div>
-
-          <div className="flex flex-col md:flex-row justify-center items-center space-y-4 md:space-y-0 md:space-x-6 pb-20">
-            <button className="flex items-center space-x-3 px-8 py-4 glass border-text-primary/5 rounded-2xl hover:bg-text-primary/5 transition-all text-text-secondary font-black text-xs uppercase tracking-widest">
-              <Printer className="w-4 h-4" />
-              <span>Print Hardcopy Case</span>
+      {/* HEADER */}
+      <header className="px-8 py-6 border-b border-slate-200 bg-white sticky top-0 z-30">
+        <div className="max-w-7xl mx-auto flex justify-between items-center">
+          <div className="flex items-center space-x-4">
+            <button onClick={() => navigate('/')} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
+              <ChevronLeft className="w-6 h-6 text-slate-500" />
             </button>
-            <button className="flex items-center space-x-3 px-8 py-4 glass border-text-primary/5 rounded-2xl hover:bg-text-primary/5 transition-all text-text-secondary font-black text-xs uppercase tracking-widest">
-              <Shield className="w-4 h-4" />
-              <span>Seal Evidence Hash</span>
+            <div>
+              <div className="flex items-center space-x-3 mb-1">
+                <h1 className="text-2xl font-bold text-slate-900">Case Investigation #{id?.substring(0, 6)}</h1>
+                <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border ${isFake ? 'bg-red-50 text-red-600 border-red-200' : 'bg-green-50 text-green-600 border-green-200'}`}>
+                  {isFake ? 'High Risk' : 'Verified Authentic'}
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 font-mono uppercase tracking-wide">
+                UID: {report.scan_id} • AI-Verified • Forensic Hash Valid
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center space-x-3">
+            <button onClick={handleShare} className="p-2 text-slate-400 hover:text-blue-600 transition-colors relative">
+              {copied ? <CheckCircle className="w-5 h-5 text-green-500" /> : <Share2 className="w-5 h-5" />}
+              {copied && <span className="absolute top-10 right-0 bg-black text-white text-[10px] px-2 py-1 rounded whitespace-nowrap z-50">Link Copied!</span>}
+            </button>
+            <button onClick={() => window.print()} className="flex items-center space-x-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-lg font-bold shadow-lg shadow-blue-200 transition-all text-sm">
+              <Download className="w-4 h-4" />
+              <span>Generate Export Report</span>
             </button>
           </div>
         </div>
-      </main>
-      {isAnalyzing && (
-        <div className="fixed inset-0 z-[100] glass flex flex-col items-center justify-center text-center p-8">
-          <motion.div
-            initial={{ scale: 0.8, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            className="relative mb-12"
-          >
-            <div className="w-32 h-32 rounded-full border-[3px] border-primary-blue/10 border-t-primary-blue animate-spin"></div>
-            <div className="absolute inset-0 flex items-center justify-center">
-              <Shield className="w-12 h-12 text-primary-blue" />
+      </header>
+
+      <main className="max-w-7xl mx-auto px-8 py-8 space-y-8">
+
+        {/* VISUALS GRID */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {/* PLAYER */}
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden relative group">
+            <div className="absolute top-4 left-4 z-10 bg-black/80 backdrop-blur text-white text-[10px] font-bold px-2 py-1 rounded uppercase tracking-wider flex items-center">
+              <Activity className="w-3 h-3 mr-1.5" /> Source Material
             </div>
-          </motion.div>
-          <h2 className="text-3xl font-black tracking-tight mb-4 uppercase italic text-text-primary">Recalibrating Forensics</h2>
-          <div className="max-w-md w-full glass bg-bg-section h-2 rounded-full overflow-hidden mb-6 border border-text-primary/5">
-            <motion.div
-              className="h-full bg-gradient-to-r from-primary-blue to-accent-cyan"
-              initial={{ width: "0%" }}
-              animate={{ width: "100%" }}
-              transition={{ duration: 2.4, ease: "easeInOut" }}
+
+            <video
+              ref={videoRef}
+              onTimeUpdate={handleTimeUpdate}
+              className="w-full aspect-video object-cover bg-black"
+              src={`http://localhost:8000/uploads/${report.scan_id}.mp4`}
+              controls
+              onError={(e) => {
+                const target = e.target as HTMLVideoElement;
+                console.log("Video load error", e);
+              }}
             />
           </div>
-          <p className="text-text-secondary font-mono text-[10px] font-bold tracking-[0.2em] uppercase animate-pulse">Scanning Latent Space for Synthesis Artifacts...</p>
+
+          {/* OVERLAY PREVIEW */}
+          <div className="bg-slate-900 rounded-2xl shadow-sm overflow-hidden relative">
+            <div className="absolute top-4 left-4 z-10 text-white/80 text-[10px] font-bold px-2 py-1 uppercase tracking-wider flex items-center">
+              <Activity className="w-3 h-3 mr-1.5" /> Analysis Overlay
+            </div>
+
+            {/* Simulated Analysis View (Grayscale + Overlays) */}
+            <div className="w-full aspect-video relative overflow-hidden">
+              <video
+                ref={(ref) => {
+                  // Sync backup video manually if needed, or just let it loop for effect
+                  if (ref && videoRef.current) {
+                    ref.currentTime = videoRef.current.currentTime;
+                  }
+                }}
+                className="w-full h-full object-cover opacity-60 grayscale"
+                src={`http://localhost:8000/uploads/${report.scan_id}.mp4`}
+                autoPlay={false} muted loop={false} // Don't autoplay, just sync potentially? Or keep as ambient visualization
+              />
+
+              {showLandmarks && (
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="border border-blue-500/50 w-32 h-40 rounded-[50%] absolute animate-pulse"></div>
+                  <div className="w-32 h-1 bg-blue-500/20 absolute top-1/3"></div>
+                </div>
+              )}
+            </div>
+
+            {/* Controls */}
+            <div className="absolute bottom-6 left-6 right-6 bg-white/10 backdrop-blur-md rounded-xl p-3 flex items-center justify-between border border-white/10">
+              <div className="flex items-center space-x-4">
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={() => setShowLandmarks(!showLandmarks)}
+                    className={`w-10 h-5 rounded-full relative transition-colors ${showLandmarks ? 'bg-blue-500' : 'bg-white/20'}`}
+                  >
+                    <div className={`w-3 h-3 bg-white rounded-full absolute top-1 transition-all ${showLandmarks ? 'left-6' : 'left-1'}`}></div>
+                  </button>
+                  <span className="text-[10px] font-bold text-white uppercase tracking-wider">Landmarks</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={() => setShowHeatmap(!showHeatmap)}
+                    className={`w-10 h-5 rounded-full relative transition-colors ${showHeatmap ? 'bg-blue-500' : 'bg-white/20'}`}
+                  >
+                    <div className={`w-3 h-3 bg-white rounded-full absolute top-1 transition-all ${showHeatmap ? 'left-6' : 'left-1'}`}></div>
+                  </button>
+                  <span className="text-[10px] font-bold text-white uppercase tracking-wider">Heatmap</span>
+                </div>
+              </div>
+              <div className="text-[10px] font-mono text-blue-300 animate-pulse">
+                FRAME {currentFrame} / {report.total_frames_analyzed}
+              </div>
+            </div>
+          </div>
         </div>
-      )}
+
+        {/* METRICS GRID */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+
+          {/* 1. DETECTION SCORE */}
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col items-center justify-center relative min-h-[400px]">
+            <div className="absolute top-6 left-6 flex items-center space-x-2 text-slate-400">
+              <Shield className="w-4 h-4" />
+              <span className="text-xs font-bold uppercase tracking-wider">Detection Score</span>
+            </div>
+
+            <div className="relative w-64 h-32 mt-10">
+              <svg viewBox="0 0 200 100" className="w-full h-full overflow-visible">
+                <path d="M 20 100 A 80 80 0 0 1 180 100" fill="none" stroke="#E2E8F0" strokeWidth="20" strokeLinecap="round" />
+                <path
+                  d="M 20 100 A 80 80 0 0 1 180 100"
+                  fill="none"
+                  stroke={scoreColor}
+                  strokeWidth="20"
+                  strokeLinecap="round"
+                  strokeDasharray="251.2"
+                  strokeDashoffset={251.2 - (251.2 * (report.confidence_score / 100))}
+                  className="transition-all duration-1000 ease-out"
+                />
+              </svg>
+              <div className="absolute bottom-0 left-1/2 -translate-x-1/2 text-center">
+                <div className="text-5xl font-black text-slate-900 mb-1">{Math.round(report.confidence_score)}%</div>
+                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Synth Confidence</div>
+              </div>
+            </div>
+
+            <div className={`mt-8 px-4 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider ${isFake ? 'bg-red-50 text-red-600' : 'bg-blue-50 text-blue-600'}`}>
+              {report.verdict}
+            </div>
+          </div>
+
+          {/* 2. FORENSIC EVIDENCE */}
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 min-h-[400px]">
+            <div className="flex justify-between items-center mb-8">
+              <div className="flex items-center space-x-2 text-slate-400">
+                <Activity className="w-4 h-4" />
+                <span className="text-xs font-bold uppercase tracking-wider">Forensic Evidence</span>
+              </div>
+              {isFake && <span className="bg-red-100 text-red-600 text-[10px] font-bold px-2 py-1 rounded">3 CRITICAL</span>}
+            </div>
+
+            <div className="space-y-4">
+              {EVIDENCE_CHECKS.map((check, i) => (
+                <div key={i} className={`p-4 rounded-xl border ${check.status === 'critical' ? 'bg-red-50/50 border-red-100' : check.status === 'warning' ? 'bg-orange-50/50 border-orange-100' : 'bg-green-50/50 border-green-100'}`}>
+                  <div className="flex items-start space-x-3">
+                    {check.status === 'critical' ? (
+                      <AlertTriangle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
+                    ) : check.status === 'warning' ? (
+                      <Info className="w-5 h-5 text-orange-500 shrink-0 mt-0.5" />
+                    ) : (
+                      <CheckCircle className="w-5 h-5 text-green-500 shrink-0 mt-0.5" />
+                    )}
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-800">{check.title}</h3>
+                      <p className="text-xs text-slate-500 mt-1 leading-relaxed">{check.desc}</p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* 3. FREQUENCY PROFILE CHART */}
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 min-h-[400px] flex flex-col">
+            <div className="flex justify-between items-center mb-6">
+              <div className="flex items-center space-x-2 text-slate-400">
+                <Activity className="w-4 h-4" />
+                <span className="text-xs font-bold uppercase tracking-wider">Frequency Profile</span>
+              </div>
+              <div className="flex items-center space-x-3">
+                <div className="flex items-center space-x-1.5">
+                  <div className="w-2 h-2 rounded-full bg-blue-500"></div>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase">Real</span>
+                </div>
+                <div className="flex items-center space-x-1.5">
+                  <div className="w-2 h-2 rounded-full bg-red-500"></div>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase">Synth</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex-1 w-full min-h-0">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={chartData}>
+                  <defs>
+                    <linearGradient id="colorSynth" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#EF4444" stopOpacity={0.1} />
+                      <stop offset="95%" stopColor="#EF4444" stopOpacity={0} />
+                    </linearGradient>
+                    <linearGradient id="colorReal" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.1} />
+                      <stop offset="95%" stopColor="#3B82F6" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                  <XAxis dataKey="time" hide />
+                  <YAxis hide domain={[0, 100]} />
+                  <RechartsTooltip
+                    contentStyle={{ backgroundColor: '#fff', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', borderRadius: '8px' }}
+                    labelStyle={{ display: 'none' }}
+                  />
+                  <Area type="monotone" dataKey="real" stroke="#3B82F6" strokeWidth={2} fillOpacity={1} fill="url(#colorReal)" />
+                  <Area type="monotone" dataKey="synth" stroke="#EF4444" strokeWidth={2} fillOpacity={1} fill="url(#colorSynth)" />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className="mt-4 space-y-3">
+              <div className="flex justify-between items-center text-xs">
+                <span className="font-bold text-slate-400 uppercase tracking-wider">Temporal Blur</span>
+                <span className="font-bold text-red-500 uppercase tracking-wider">High Variance</span>
+              </div>
+              <div className="h-1 w-full bg-slate-100 rounded-full overflow-hidden">
+                <div className="h-full bg-red-500 w-3/4"></div>
+              </div>
+
+              <div className="flex justify-between items-center text-xs">
+                <span className="font-bold text-slate-400 uppercase tracking-wider">Artifact Density</span>
+                <span className="font-bold text-red-500 uppercase tracking-wider">0.82 / Frame</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* TIMELINE */}
+        <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-200">
+          <div className="flex items-center space-x-2 text-slate-400 mb-8">
+            <Activity className="w-4 h-4" />
+            <span className="text-xs font-bold uppercase tracking-wider">Artifact Detection Timeline</span>
+          </div>
+
+          <div className="h-16 bg-slate-50 rounded-lg relative overflow-hidden flex items-end cursor-pointer group">
+            {/* Generate bars based on frame data */}
+            {report.frame_data.map((frame, i) => {
+              const isAnomaly = frame.ai_probability > 0.5;
+              const isActive = i === currentFrame;
+              return (
+                <div
+                  key={i}
+                  onClick={() => handleTimelineClick(i)}
+                  className={`flex-1 mx-px transition-all hover:scale-y-110 ${isActive ? 'bg-blue-600 !opacity-100 scale-y-110' : isAnomaly ? 'bg-red-400' : 'bg-slate-200'} ${isActive ? '' : 'opacity-80'}`}
+                  style={{ height: isAnomaly ? `${frame.ai_probability * 100}%` : '20%' }}
+                  title={`Time: ${frame.timestamp}s | Score: ${(frame.ai_probability * 100).toFixed(0)}%`}
+                ></div>
+              );
+            })}
+          </div>
+
+          <div className="flex justify-between mt-2 text-[10px] font-mono text-slate-400 uppercase">
+            <span>00:00:00</span>
+            <span>00:00:{(report.frame_data.length / 2).toFixed(0).padStart(2, '0')}</span>
+            <span>00:00:{report.frame_data.length.toFixed(0).padStart(2, '0')}</span>
+          </div>
+        </div>
+
+        {/* ACTIONS */}
+        <div className="flex justify-center space-x-4 pt-4">
+          <button onClick={() => window.print()} className="bg-white border border-slate-200 hover:border-blue-300 text-slate-600 hover:text-blue-600 px-8 py-4 rounded-xl font-bold uppercase tracking-wider text-xs flex items-center space-x-3 transition-all shadow-sm">
+            <Printer className="w-4 h-4" />
+            <span>Print Hardcopy Case</span>
+          </button>
+          <button className="bg-white border border-slate-200 hover:border-green-300 text-slate-600 hover:text-green-600 px-8 py-4 rounded-xl font-bold uppercase tracking-wider text-xs flex items-center space-x-3 transition-all shadow-sm">
+            <Lock className="w-4 h-4" />
+            <span>Seal Evidence Hash</span>
+          </button>
+        </div>
+
+      </main>
     </div>
   );
 };

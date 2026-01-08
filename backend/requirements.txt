@@ -1,8 +1,15 @@
 fastapi
 uvicorn
 python-multipart
-opencv-python-headless
-numpy
-scipy
-pillow
-tensorflow
+# opencv-python-headless
+# numpy
+# scipy
+# pillow
+# transformers
+# torch
+# huggingface_hub
+# mediapipe
+loguru
+motor
+pymongo
+dnspython

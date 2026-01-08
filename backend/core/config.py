@@ -1,14 +1,28 @@
 import os
+from pathlib import Path
 
 class Settings:
-    PROJECT_NAME: str = "Sentinel AI - Deepfake Detection Backend"
-    API_V1_STR: str = "/api"
+    PROJECT_NAME: str = "Deepfake Defense System"
+    VERSION: str = "2.0 (Advanced)"
     
-    # Storage Paths
-    BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    STORAGE_DIR = os.path.join(BASE_DIR, "storage")
+    # Dynamic Path Setup
+    BASE_DIR = Path(__file__).resolve().parent.parent.parent
+    STORAGE_DIR = BASE_DIR / "storage"
     
-    # Ensure storage directory exists
-    os.makedirs(STORAGE_DIR, exist_ok=True)
+    UPLOAD_FOLDER = STORAGE_DIR / "uploads"
+    PROCESSED_FOLDER = STORAGE_DIR / "processed"
+    RESULTS_FOLDER = STORAGE_DIR / "results"
+    
+    # Allowed Video Formats
+    # Allowed Video Formats
+    ALLOWED_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv"}
+
+    # Database
+    MONGO_URI: str = os.getenv("MONGO_URI", "mongodb+srv://vvdharani57_db_user:GPRXbgUnuzy9FSnW@cluster0.tnkfodr.mongodb.net/?appName=Cluster0")
+    MONGO_DB_NAME: str = os.getenv("MONGO_DB_NAME", "sentinel_ai")
 
 settings = Settings()
+
+# Auto-create directories on start
+for folder in [settings.UPLOAD_FOLDER, settings.PROCESSED_FOLDER, settings.RESULTS_FOLDER]:
+    folder.mkdir(parents=True, exist_ok=True)

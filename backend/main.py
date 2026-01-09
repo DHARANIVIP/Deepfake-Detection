@@ -33,9 +33,18 @@ async def shutdown_event():
     db.close()
 
 # --- serve static files ---
-# Mount the assets folder (JS/CSS)
-app.mount("/assets", StaticFiles(directory="dist/assets"), name="assets")
+dist_dir = "dist"
+assets_dir = os.path.join(dist_dir, "assets")
+
+# Mount the assets folder (JS/CSS) ONLY if it exists (Render deployment might only have backend)
+if os.path.exists(assets_dir) and os.path.isdir(assets_dir):
+    app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+else:
+    logger.warning(f"Assets directory '{assets_dir}' not found. Frontend will not be served from here.")
+
 # Mount uploads for video playback (Frontend needs to access http://localhost:8000/uploads/video.mp4)
+if not os.path.exists(settings.UPLOAD_FOLDER):
+    os.makedirs(settings.UPLOAD_FOLDER)
 app.mount("/uploads", StaticFiles(directory=settings.UPLOAD_FOLDER), name="uploads")
 
 # API Routes
@@ -82,7 +91,10 @@ async def get_results(scan_id: str):
 
 @app.get("/")
 async def serve_index():
-    return FileResponse("dist/index.html")
+    index_path = os.path.join(dist_dir, "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
+    return {"status": "Backend Running", "info": "Frontend files not found (deployed separately)."}
 
 @app.get("/{full_path:path}")
 async def serve_spa(full_path: str):
@@ -90,11 +102,16 @@ async def serve_spa(full_path: str):
     if ".." in full_path:
         raise HTTPException(status_code=404)
         
-    file_path = f"dist/{full_path}"
+    file_path = os.path.join(dist_dir, full_path)
     
     # If it is a file, serve it directly
     if os.path.exists(file_path) and os.path.isfile(file_path):
         return FileResponse(file_path)
     
-    # Otherwise, for client-side routing, serve index.html
-    return FileResponse("dist/index.html")
+    # Otherwise, check for index.html for client-side routing
+    index_path = os.path.join(dist_dir, "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
+        
+    # If no frontend files, just return 404 for non-api routes
+    raise HTTPException(status_code=404, detail="File not found")

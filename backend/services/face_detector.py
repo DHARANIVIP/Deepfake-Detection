@@ -1,57 +1,79 @@
 import logging
+import os
+from loguru import logger
+
 try:
     import cv2
-    import mediapipe as mp
     import numpy as np
-    
-    # Initialize MediaPipe Face Detection
+except ImportError:
+    cv2 = None
+    np = None
+
+# MediaPipe is optional (Too heavy for free tier)
+try:
+    import mediapipe as mp
     mp_face_detection = mp.solutions.face_detection
     detector = mp_face_detection.FaceDetection(model_selection=1, min_detection_confidence=0.6)
 except ImportError:
-    cv2 = None
-    mp = None
-    np = None
     detector = None
-
-from loguru import logger
+    # Pre-load Haar Cascade as fallback
+    face_cascade = None
+    if cv2:
+        # Try finding the XML in standard paths
+        xml_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+        face_cascade = cv2.CascadeClassifier(xml_path)
 
 def crop_face_advanced(frame):
     """
-    Detects face using Google MediaPipe and returns the cropped numpy array.
-    Returns: (cropped_face, status_boolean)
+    Detects face using MediaPipe (Best) -> Haar Cascade (Fast) -> Center Crop (Fallback).
+    Returns: (cropped_face_numpy, found_boolean)
     """
-    if detector is None:
-        # Lite Mode: Simulate finding a face (return None or random noise if needed, or just True)
-        return None, True 
+    if cv2 is None:
+        return None, False # Cannot process without CV2
 
-    try:
-        height, width, _ = frame.shape
-        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        results = detector.process(rgb_frame)
+    height, width, _ = frame.shape
 
-        if not results.detections:
-            return None, False
+    # 1. Try MediaPipe (If installed)
+    if detector:
+        try:
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            results = detector.process(rgb_frame)
+            if results.detections:
+                detection = results.detections[0]
+                bbox = detection.location_data.relative_bounding_box
+                x = int(bbox.xmin * width)
+                y = int(bbox.ymin * height)
+                w = int(bbox.width * width)
+                h = int(bbox.height * height)
+                
+                # Padding
+                x_pad, y_pad = int(w * 0.2), int(h * 0.2)
+                x1, y1 = max(0, x - x_pad), max(0, y - y_pad)
+                x2, y2 = min(width, x + w + x_pad), min(height, y + h + y_pad)
+                
+                return frame[y1:y2, x1:x2], True
+        except Exception as e:
+            logger.warning(f"MediaPipe Failed: {e}")
 
-        # Get the first face (Assumption: Single person video)
-        detection = results.detections[0]
-        bbox = detection.location_data.relative_bounding_box
+    # 2. Try Haar Cascade (Lightweight Fallback)
+    if face_cascade:
+        try:
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            faces = face_cascade.detectMultiScale(gray, 1.3, 5)
+            if len(faces) > 0:
+                x, y, w, h = faces[0]
+                # Padding
+                pad = int(w * 0.2)
+                x1, y1 = max(0, x - pad), max(0, y - pad)
+                x2, y2 = min(width, x + w + pad), min(height, y + h + pad)
+                return frame[y1:y2, x1:x2], True
+        except Exception as e:
+            logger.warning(f"Haar Cascade Failed: {e}")
 
-        # Convert relative coordinates to pixels
-        x = int(bbox.xmin * width)
-        y = int(bbox.ymin * height)
-        w = int(bbox.width * width)
-        h = int(bbox.height * height)
-
-        # Add Padding (20%) to capture chin/forehead artifacts
-        x_pad, y_pad = int(w * 0.2), int(h * 0.2)
-        x1 = max(0, x - x_pad)
-        y1 = max(0, y - y_pad)
-        x2 = min(width, x + w + x_pad)
-        y2 = min(height, y + h + y_pad)
-
-        cropped_face = frame[y1:y2, x1:x2]
-        return cropped_face, True
-
-    except Exception as e:
-        logger.error(f"Face Detection Failed: {e}")
-        return None, False
+    # 3. Last Resort: Center Crop (Better than crashing)
+    # If no face detected, assume center of video is relevant
+    h_center, w_center = height // 2, width // 2
+    h_size, w_size = height // 2, width // 2 # 50% crop
+    y1 = max(0, h_center - h_size // 2)
+    x1 = max(0, w_center - w_size // 2)
+    return frame[y1:y1+h_size, x1:x1+w_size], True

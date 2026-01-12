@@ -1,16 +1,15 @@
 fastapi
 uvicorn
 python-multipart
+# Changed from opencv-python to headless for Render
 opencv-python-headless
 numpy
-# scipy
-# pillow
-# transformers
-# torch
-# huggingface_hub
-# mediapipe
-loguru
-motor
-pymongo
-dnspython
 python-dotenv
+motor
+pydantic
+loguru
+requests
+httpx
+transformers
+torch
+pillow

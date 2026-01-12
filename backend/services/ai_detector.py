@@ -30,15 +30,21 @@ if hf_token and InferenceClient:
     except Exception as e:
         logger.warning(f"Could not initialize HF Client: {e}")
 
-# Setup Local Pipeline (Fallback)
+# Setup Local Pipeline (Lazy Load)
 ai_pipe = None
-if not client and pipeline:
-    try:
-        logger.info(f"Loading Local AI Model: {LOCAL_MODEL_NAME}...")
-        ai_pipe = pipeline("image-classification", model=LOCAL_MODEL_NAME, device=-1)
-        logger.success("Local AI Model Loaded.")
-    except Exception as e:
-        logger.error(f"Local AI Load Failed: {e}")
+
+def get_local_pipe():
+    global ai_pipe
+    if ai_pipe is None and pipeline:
+        try:
+            logger.info(f"Loading Local AI Model (Lazy): {LOCAL_MODEL_NAME}...")
+            # We use a try-catch block here to prevent crashing if OOM occurs
+            ai_pipe = pipeline("image-classification", model=LOCAL_MODEL_NAME, device=-1)
+            logger.success("Local AI Model Loaded.")
+        except Exception as e:
+            logger.error(f"Local AI Load Failed (Likely OOM): {e}")
+            ai_pipe = "FAILED" # Prevent retrying
+    return ai_pipe if ai_pipe != "FAILED" else None
 
 def get_ai_prediction(image_path: str):
     """Returns probability of being FAKE (0.0 to 1.0)"""
@@ -77,7 +83,8 @@ def get_ai_prediction(image_path: str):
                 # Fallthrough to local
 
         # STRATEGY 2: Local Pipeline
-        if ai_pipe and Image:
+        local_pipe = get_local_pipe()
+        if local_pipe and Image:
             pil_image = Image.open(image_path)
             result = ai_pipe(pil_image)
             top = result[0]

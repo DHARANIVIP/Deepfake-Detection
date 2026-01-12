@@ -86,7 +86,8 @@ def get_ai_prediction(image_path: str):
         local_pipe = get_local_pipe()
         if local_pipe and Image:
             pil_image = Image.open(image_path)
-            result = ai_pipe(pil_image)
+            # Use the local variable 'local_pipe', not the global 'ai_pipe'
+            result = local_pipe(pil_image)
             top = result[0]
             label = top['label'].lower()
             score = top['score']
@@ -97,7 +98,7 @@ def get_ai_prediction(image_path: str):
                 return 1.0 - score
                 
         # Fallback if both fail
-        logger.warning("No AI model available. Returning random")
+        logger.warning(f"No AI model available (Client: {bool(client)}, Pipe: {bool(local_pipe)}). Returning random score.")
         return random.uniform(0.1, 0.9)
             
     except Exception as e:

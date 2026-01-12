@@ -58,7 +58,7 @@ async def process_video_pipeline(scan_id: str, video_path: str):
                 return
 
             fps = cap.get(cv2.CAP_PROP_FPS) or 30
-            skip_rate = int(fps) 
+            skip_rate = int(fps) * 2 # Process every 2 seconds for performance 
             current_frame = 0
             
             while cap.isOpened():

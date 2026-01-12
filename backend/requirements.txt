@@ -10,6 +10,9 @@ pydantic
 loguru
 requests
 httpx
-transformers
+# Force CPU-only PyTorch (Critical for Render Free Tier)
+--extra-index-url https://download.pytorch.org/whl/cpu
 torch
+torchvision
+transformers
 pillow

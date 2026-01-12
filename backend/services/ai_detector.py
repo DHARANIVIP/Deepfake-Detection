@@ -105,36 +105,4 @@ def get_ai_prediction(image_path: str):
         logger.error(f"AI Prediction Error: {e}")
         return 0.5
 
-# --- 2. MATH ENGINE (FFT) ---
-def get_fft_score(image_path: str):
-    """
-    Analyzes frequency domain artifacts.
-    High score (> 60) = Likely Generated/GAN.
-    """
-    if cv2 is None or np is None:
-        return random.uniform(20, 80)
-        
-    try:
-        img = cv2.imread(image_path, 0) # Grayscale
-        if img is None: return 0
 
-        # Fast Fourier Transform
-        f = np.fft.fft2(img)
-        fshift = np.fft.fftshift(f)
-        magnitude = 20 * np.log(np.abs(fshift) + 1e-10)
-
-        # Calculate high-frequency noise (Edges of the spectrum)
-        rows, cols = img.shape
-        crow, ccol = rows//2, cols//2
-        # Mask the center (low freq)
-        magnitude[crow-10:crow+10, ccol-10:ccol+10] = 0
-        
-        score = np.mean(magnitude)
-        # Normalize to 0-100 scale based on experimental data
-        # GANs usually have scores > 140, Real images ~100-120
-        normalized = min(max((score - 100) * 2, 0), 100)
-        return normalized
-
-    except Exception as e:
-        logger.error(f"FFT Error: {e}")
-        return 0

@@ -13,3 +13,4 @@ loguru
 motor
 pymongo
 dnspython
+python-dotenv
